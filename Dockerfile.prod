@@ -1,0 +1,71 @@
+###########
+# BUILDER #
+###########
+
+# pull official base image
+FROM python:3.10.12-slim-buster as builder
+
+# set work directory
+WORKDIR /usr/src/social_network
+
+# set environment variables
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+
+# install system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc
+
+# lint
+RUN pip install --upgrade pip
+RUN pip install flake8==6.0.0
+COPY . /usr/src/social_network/
+RUN flake8 --ignore=E501,F401 .
+
+# install python dependencies
+COPY ./requirements.txt .
+RUN pip wheel --no-cache-dir --no-deps --wheel-dir /usr/src/social_network/wheels -r requirements.txt
+
+
+#########
+# FINAL #
+#########
+
+# pull official base image
+FROM python:3.10.12-slim-buster
+
+# create directory for the social_network user
+RUN mkdir -p /home/social_network
+
+# create the social_network user
+RUN addgroup --system social_network && adduser --system --group social_network
+
+# create the social_networkropriate directories
+ENV HOME=/home/social_network
+ENV APP_HOME=/home/social_network/web
+RUN mkdir $APP_HOME
+WORKDIR $APP_HOME
+
+# install dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends netcat
+COPY --from=builder /usr/src/social_network/wheels /wheels
+COPY --from=builder /usr/src/social_network/requirements.txt .
+RUN pip install --upgrade pip
+RUN pip install --no-cache /wheels/*
+
+# copy entrypoint.prod.sh
+COPY ./entrypoint.prod.sh .
+RUN sed -i 's/\r$//g'  $APP_HOME/entrypoint.prod.sh
+RUN chmod +x  $APP_HOME/entrypoint.prod.sh
+
+# copy project
+COPY . $APP_HOME
+
+# chown all the files to the social_network user
+RUN chown -R social_network:social_network $APP_HOME
+
+# change to the social_network user
+USER social_network
+
+# run entrypoint.prod.sh
+ENTRYPOINT ["/home/social_network/web/entrypoint.prod.sh"]
